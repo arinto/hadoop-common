@@ -53,7 +53,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.RMContextImpl;
 import org.apache.hadoop.yarn.server.resourcemanager.amlauncher.AMLauncherEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.amlauncher.AMLauncherEventType;
 import org.apache.hadoop.yarn.server.resourcemanager.amlauncher.ApplicationMasterLauncher;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.MemStore;
+import org.apache.hadoop.yarn.server.resourcemanager.recovery.RMStateStore;
 import org.apache.hadoop.yarn.server.resourcemanager.resourcetracker.InlineDispatcher;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMApp;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMAppEvent;
@@ -66,6 +66,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.event.RMAppAt
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.event.RMAppAttemptLaunchFailedEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.event.RMAppAttemptRegistrationEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.event.RMAppAttemptRejectedEvent;
+import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.event.RMAppAttemptStoredEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.event.RMAppAttemptUnregistrationEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.rmcontainer.ContainerAllocationExpirer;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.Allocation;
@@ -162,7 +163,7 @@ public class TestRMAppAttemptTransitions {
     amFinishingMonitor = mock(AMLivelinessMonitor.class);
     Configuration conf = new Configuration();
     rmContext =
-        new RMContextImpl(new MemStore(), rmDispatcher,
+        new RMContextImpl(rmDispatcher,
           containerAllocationExpirer, amLivelinessMonitor, amFinishingMonitor,
           null, new ApplicationTokenSecretManager(conf),
           new RMContainerTokenSecretManager(conf),
@@ -295,6 +296,14 @@ public class TestRMAppAttemptTransitions {
     assertEquals(0.0, (double)applicationAttempt.getProgress(), 0.0001);
     assertEquals(0, applicationAttempt.getRanNodes().size());
     assertNull(applicationAttempt.getFinalApplicationStatus());
+  }
+  
+  /**
+   * {@link RMAppAttemptState#KILLED}
+   */
+  private void testAppAttemptRecoveredState() {
+    assertEquals(RMAppAttemptState.RECOVERED, 
+        applicationAttempt.getAppAttemptState());
   }
 
   /**
@@ -439,6 +448,16 @@ public class TestRMAppAttemptTransitions {
         new RMAppAttemptEvent(
             applicationAttempt.getAppAttemptId(), 
             RMAppAttemptEventType.APP_ACCEPTED));
+    
+    RMStateStore store = rmContext.getStateStore();
+    if(store != null && unmanagedAM){
+      assertEquals(RMAppAttemptState.LAUNCHED_UNMANAGED_SAVING, 
+          applicationAttempt.getAppAttemptState());
+      applicationAttempt.handle(
+          new RMAppAttemptStoredEvent(
+              applicationAttempt.getAppAttemptId(), null));
+    }
+    
     testAppAttemptScheduledState();
   }
 
@@ -463,6 +482,15 @@ public class TestRMAppAttemptTransitions {
         new RMAppAttemptContainerAllocatedEvent(
             applicationAttempt.getAppAttemptId(), 
             container));
+    
+    RMStateStore store = rmContext.getStateStore();
+    if(store != null){
+      assertEquals(RMAppAttemptState.ALLOCATED_SAVING, 
+          applicationAttempt.getAppAttemptState());
+      applicationAttempt.handle(
+          new RMAppAttemptStoredEvent(
+              applicationAttempt.getAppAttemptId(), null));
+    }
     
     testAppAttemptAllocatedState(container);
     
@@ -530,6 +558,14 @@ public class TestRMAppAttemptTransitions {
   }
   
   @Test
+  public void testUnamanagedAMSuccessWithStore() {
+    RMStateStore store = mock(RMStateStore.class);
+    ((RMContextImpl) rmContext).setStateStore(store);
+    testUnmanagedAMSuccess();
+    verify(store, times(1)).storeApplicationAttempt(applicationAttempt);
+  }
+  
+  @Test
   public void testUnmanagedAMUnexpectedRegistration() {
     unmanagedAM = true;
     when(submissionContext.getUnmanagedAM()).thenReturn(true);
@@ -554,6 +590,15 @@ public class TestRMAppAttemptTransitions {
             RMAppAttemptEventType.KILL));
     testAppAttemptKilledState(null, EMPTY_DIAGNOSTICS);
   } 
+  
+  @Test
+  public void testNewToRecovered() {
+    applicationAttempt.handle(
+        new RMAppAttemptEvent(
+            applicationAttempt.getAppAttemptId(), 
+            RMAppAttemptEventType.RECOVER));
+    testAppAttemptRecoveredState();
+  }
   
   @Test
   public void testSubmittedToFailed() {
@@ -604,6 +649,14 @@ public class TestRMAppAttemptTransitions {
             applicationAttempt.getAppAttemptId(), 
             diagnostics));
     testAppAttemptFailedState(amContainer, diagnostics);
+  }
+  
+  @Test
+  public void testStateStore() {
+    RMStateStore store = mock(RMStateStore.class);
+    ((RMContextImpl) rmContext).setStateStore(store);
+    allocateApplicationAttempt();
+    verify(store, times(1)).storeApplicationAttempt(applicationAttempt);
   }
 
   @Test

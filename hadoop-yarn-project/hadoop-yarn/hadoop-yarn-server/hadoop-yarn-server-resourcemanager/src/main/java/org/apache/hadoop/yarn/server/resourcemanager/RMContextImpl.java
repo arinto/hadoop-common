@@ -24,9 +24,7 @@ import java.util.concurrent.ConcurrentMap;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.NodeId;
 import org.apache.hadoop.yarn.event.Dispatcher;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.ApplicationsStore;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.NodeStore;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.Store;
+import org.apache.hadoop.yarn.server.resourcemanager.recovery.RMStateStore;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMApp;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.AMLivelinessMonitor;
 import org.apache.hadoop.yarn.server.resourcemanager.rmcontainer.ContainerAllocationExpirer;
@@ -36,10 +34,11 @@ import org.apache.hadoop.yarn.server.resourcemanager.security.ClientToAMTokenSec
 import org.apache.hadoop.yarn.server.resourcemanager.security.DelegationTokenRenewer;
 import org.apache.hadoop.yarn.server.resourcemanager.security.RMContainerTokenSecretManager;
 
+import com.google.common.annotations.VisibleForTesting;
+
 public class RMContextImpl implements RMContext {
 
   private final Dispatcher rmDispatcher;
-  private final Store store;
 
   private final ConcurrentMap<ApplicationId, RMApp> applications
     = new ConcurrentHashMap<ApplicationId, RMApp>();
@@ -52,13 +51,14 @@ public class RMContextImpl implements RMContext {
 
   private AMLivelinessMonitor amLivelinessMonitor;
   private AMLivelinessMonitor amFinishingMonitor;
+  private RMStateStore stateStore;
   private ContainerAllocationExpirer containerAllocationExpirer;
   private final DelegationTokenRenewer tokenRenewer;
   private final ApplicationTokenSecretManager appTokenSecretManager;
   private final RMContainerTokenSecretManager containerTokenSecretManager;
   private final ClientToAMTokenSecretManagerInRM clientToAMTokenSecretManager;
 
-  public RMContextImpl(Store store, Dispatcher rmDispatcher,
+  public RMContextImpl(Dispatcher rmDispatcher,
       ContainerAllocationExpirer containerAllocationExpirer,
       AMLivelinessMonitor amLivelinessMonitor,
       AMLivelinessMonitor amFinishingMonitor,
@@ -66,7 +66,6 @@ public class RMContextImpl implements RMContext {
       ApplicationTokenSecretManager appTokenSecretManager,
       RMContainerTokenSecretManager containerTokenSecretManager,
       ClientToAMTokenSecretManagerInRM clientTokenSecretManager) {
-    this.store = store;
     this.rmDispatcher = rmDispatcher;
     this.containerAllocationExpirer = containerAllocationExpirer;
     this.amLivelinessMonitor = amLivelinessMonitor;
@@ -81,15 +80,10 @@ public class RMContextImpl implements RMContext {
   public Dispatcher getDispatcher() {
     return this.rmDispatcher;
   }
-
-  @Override
-  public NodeStore getNodeStore() {
-   return store;
-  }
-
-  @Override
-  public ApplicationsStore getApplicationsStore() {
-    return store;
+  
+  @Override 
+  public RMStateStore getStateStore() {
+    return stateStore;
   }
 
   @Override
@@ -140,5 +134,10 @@ public class RMContextImpl implements RMContext {
   @Override
   public ClientToAMTokenSecretManagerInRM getClientToAMTokenSecretManager() {
     return this.clientToAMTokenSecretManager;
+  }
+  
+  @VisibleForTesting
+  public void setStateStore(RMStateStore store) {
+    stateStore = store;
   }
 }

@@ -20,6 +20,7 @@ package org.apache.hadoop.yarn.server.resourcemanager;
 
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -45,13 +46,15 @@ import org.apache.hadoop.yarn.event.EventHandler;
 import org.apache.hadoop.yarn.server.RMDelegationTokenSecretManager;
 import org.apache.hadoop.yarn.server.resourcemanager.amlauncher.AMLauncherEventType;
 import org.apache.hadoop.yarn.server.resourcemanager.amlauncher.ApplicationMasterLauncher;
+import org.apache.hadoop.yarn.server.resourcemanager.recovery.RMStateStore.ApplicationState;
 import org.apache.hadoop.yarn.server.resourcemanager.recovery.Recoverable;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.Store;
-import org.apache.hadoop.yarn.server.resourcemanager.recovery.Store.RMState;
+import org.apache.hadoop.yarn.server.resourcemanager.recovery.RMStateStore;
+import org.apache.hadoop.yarn.server.resourcemanager.recovery.RMStateStore.RMState;
 import org.apache.hadoop.yarn.server.resourcemanager.recovery.StoreFactory;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMApp;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMAppEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMAppEventType;
+import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMAppImpl;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.AMLivelinessMonitor;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.RMAppAttempt;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.RMAppAttemptEvent;
@@ -119,13 +122,15 @@ public class ResourceManager extends CompositeService implements Recoverable {
   protected RMDelegationTokenSecretManager rmDTSecretManager;
   private WebApp webApp;
   protected RMContext rmContext;
-  private final Store store;
+  private final RMStateStore store;
+  private final boolean recoveryEnabled;
   protected ResourceTrackerService resourceTracker;
 
   private Configuration conf;
 
-  public ResourceManager(Store store) {
+  public ResourceManager(boolean recoveryEnabled, RMStateStore store) {
     super("ResourceManager");
+    this.recoveryEnabled = recoveryEnabled;
     this.store = store;
   }
   
@@ -142,6 +147,10 @@ public class ResourceManager extends CompositeService implements Recoverable {
 
     this.rmDispatcher = createDispatcher();
     addIfService(this.rmDispatcher);
+    
+    if(recoveryEnabled) {
+      store.setDispatcher(rmDispatcher);
+    }
 
     this.appTokenSecretManager = createApplicationTokenSecretManager(conf);
 
@@ -161,10 +170,14 @@ public class ResourceManager extends CompositeService implements Recoverable {
     this.containerTokenSecretManager = createContainerTokenSecretManager(conf);
     
     this.rmContext =
-        new RMContextImpl(this.store, this.rmDispatcher,
+        new RMContextImpl(this.rmDispatcher,
           this.containerAllocationExpirer, amLivelinessMonitor,
           amFinishingMonitor, tokenRenewer, this.appTokenSecretManager,
           this.containerTokenSecretManager, this.clientToAMSecretManager);
+    
+    if(recoveryEnabled) {
+      ((RMContextImpl) rmContext).setStateStore(store);
+    }
 
     // Register event handler for NodesListManager
     this.nodesListManager = new NodesListManager(this.rmContext);
@@ -554,6 +567,14 @@ public class ResourceManager extends CompositeService implements Recoverable {
     }*/
 
     DefaultMetricsSystem.shutdown();
+    
+    if(store != null) {
+      try {
+        store.close();
+      } catch (Exception e) {
+        LOG.error("Error closing store.", e);
+      }
+    }
 
     super.stop();
   }
@@ -643,8 +664,31 @@ public class ResourceManager extends CompositeService implements Recoverable {
 
   @Override
   public void recover(RMState state) throws Exception {
-    resourceTracker.recover(state);
-    scheduler.recover(state);
+    // recover applications
+    Map<ApplicationId, ApplicationState> appStates = state.getApplicationState();
+    LOG.info("Recovering " + appStates.size() + " applications");
+    for(ApplicationState appState : appStates.values()) {
+      // re-submit the application
+      // this is going to send an app start event but since the async dispatcher 
+      // has not started that event will be queued until we have completed re
+      // populating the state
+      if(appState.getApplicationSubmissionContext().getUnmanagedAM()) {
+        // do not recover unmanaged applications since current recovery 
+        // mechanism of restarting attempts does not work for them.
+        // This will need to be changed in work preserving recovery in which 
+        // RM will re-connect with the running AM's instead of restarting them
+        LOG.info("Not recovering unmanaged application " + appState.getAppId());
+        store.removeApplication(appState);
+      } else {
+        LOG.info("Recovering application " + appState.getAppId());
+        rmAppManager.submitApplication(
+            appState.getApplicationSubmissionContext(), appState.getSubmitTime());
+        // re-populate attempt information in application
+        RMAppImpl appImpl = (RMAppImpl) rmContext.getRMApps().get(
+            appState.getAppId());
+        appImpl.recover(state);
+      }
+    }
   }
   
   public static void main(String argv[]) {
@@ -652,14 +696,27 @@ public class ResourceManager extends CompositeService implements Recoverable {
     StringUtils.startupShutdownMessage(ResourceManager.class, argv, LOG);
     try {
       Configuration conf = new YarnConfiguration();
-      Store store =  StoreFactory.getStore(conf);
-      ResourceManager resourceManager = new ResourceManager(store);
+      boolean recoveryEnabled = conf.getBoolean(
+          YarnConfiguration.RECOVERY_ENABLED,
+          YarnConfiguration.DEFAULT_RM_RECOVERY_ENABLED);
+      
+      RMStateStore store =  StoreFactory.getStore(conf);
+      store.init(conf);
+      ResourceManager resourceManager = new ResourceManager(recoveryEnabled, store);
       ShutdownHookManager.get().addShutdownHook(
         new CompositeServiceShutdownHook(resourceManager),
         SHUTDOWN_HOOK_PRIORITY);
       resourceManager.init(conf);
-      //resourceManager.recover(store.restore());
-      //store.doneWithRecovery();
+      if(recoveryEnabled) {
+        try {
+          RMState state = store.loadState();
+          resourceManager.recover(state);
+        } catch (Exception e) {
+          // the Exception from loadState() needs to be handled differently for 
+          // HA and we need to give up master status if we got fenced
+          LOG.error("Failed to load state");
+        }
+      }
       resourceManager.start();
     } catch (Throwable t) {
       LOG.fatal("Error starting ResourceManager", t);

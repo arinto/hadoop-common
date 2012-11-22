@@ -205,19 +205,14 @@
   </property>
 
   <property>
+    <description>Enable RM to recover state after starting</description>
+    <name>yarn.resourcemanager.recovery.enabled</name>
+    <value>false</value>
+  </property>
+
+  <property>
     <description>The class to use as the persistent store.</description>
     <name>yarn.resourcemanager.store.class</name>
-  </property>
-
-  <property>
-    <description>The address of the zookeeper instance to use with ZK store.</description>
-    <name>yarn.resourcemanager.zookeeper-store.address</name>
-  </property>
-
-  <property>
-    <description>The zookeeper session timeout for the zookeeper store.</description>
-    <name>yarn.resourcemanager.zookeeper-store.session.timeout-ms</name>
-    <value>60000</value>
   </property>
 
   <property>
