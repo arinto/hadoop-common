@@ -64,6 +64,14 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xs
         <enabled>false</enabled>
       </snapshots>
     </repository>
+    <repository>
+       <id>sics-release</id>
+       <name>SICS Release Repository</name>
+       <url>http://kompics.sics.se/maven/repository</url>
+       <snapshots>
+           <updatePolicy>never</updatePolicy>
+       </snapshots>
+   </repository>
   </repositories>
 
   <licenses>
