@@ -99,6 +99,8 @@ public class TestNDBRMRestart {
     RMAppAttempt attempt1 = app1.getCurrentAppAttempt();
     ApplicationAttemptId attemptId1 = attempt1.getAppAttemptId();
     rm1.waitForState(attemptId1, RMAppAttemptState.ALLOCATED);
+    
+    appState = ndbStore.loadState().getApplicationState().get(app1.getApplicationId());
     Assert.assertEquals(1, appState.getAttemptCount());
     ApplicationAttemptState attemptState = 
                                 appState.getAttempt(attemptId1);
