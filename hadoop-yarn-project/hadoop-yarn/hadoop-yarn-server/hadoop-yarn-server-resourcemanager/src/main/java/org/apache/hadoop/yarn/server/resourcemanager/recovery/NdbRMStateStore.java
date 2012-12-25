@@ -42,6 +42,7 @@ import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationAttemptIdPBImpl;
 import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationAttemptStateDataPBImpl;
 import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationIdPBImpl;
 import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationStateDataPBImpl;
+import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.proto.YarnProtos;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 
@@ -69,7 +70,7 @@ public class NdbRMStateStore extends RMStateStore {
             //Retrieve list of application state
             QueryBuilder builder = _session.getQueryBuilder();
             QueryDomainType<NdbApplicationStateCJ> domainApp = 
-                    builder.createQueryDefinition(NdbApplicationStateCJ.class);;
+                    builder.createQueryDefinition(NdbApplicationStateCJ.class);
             Query<NdbApplicationStateCJ> queryApp = 
                     _session.createQuery(domainApp);
             List<NdbApplicationStateCJ> resultsApp = queryApp.getResultList();
@@ -141,8 +142,14 @@ public class NdbRMStateStore extends RMStateStore {
 
     @Override
     protected void initInternal(Configuration conf) throws Exception {
-        //TODO: use conf instance to get the path to clusterj.properties
-        File propsFile = new File("src/test/java/org/apache/hadoop/yarn/server/resourcemanager/clusterj.properties");
+        String clusterJPropFilePath = 
+                conf.get(YarnConfiguration.NDB_RM_STATE_STORE_CONFIG_PATH);
+        
+        if(clusterJPropFilePath == null){
+            throw new NullPointerException("Invalid properties file!");
+        }
+        
+        File propsFile = new File(clusterJPropFilePath);
         InputStream inStream;
         try {
             inStream = new FileInputStream(propsFile);
