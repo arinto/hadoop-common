@@ -145,6 +145,7 @@ public class TestNDBRMRestart {
     // wait for attempt to reach LAUNCHED state 
     rm1.waitForState(unmanagedAttemptId, RMAppAttemptState.LAUNCHED);
     // assert unmanaged attempt info is saved
+    appState = ndbStore.loadState().getApplicationState().get(appUnmanaged.getApplicationId());
     Assert.assertEquals(1, appState.getAttemptCount());
     Assert.assertEquals(appState.getApplicationSubmissionContext()
         .getApplicationId(), appUnmanaged.getApplicationSubmissionContext()
