@@ -260,7 +260,7 @@
     </Match>
     <Match>
       <!-- protobuf generated code -->
-      <Class name="~org\.apache\.hadoop\.ipc\.protobuf\.HadoopRpcProtos.*"/>
+      <Class name="~org\.apache\.hadoop\.ipc\.protobuf\.ProtobufRpcEngineProtos.*"/>
     </Match>
     <Match>
       <!-- protobuf generated code -->
@@ -272,7 +272,7 @@
     </Match>
         <Match>
       <!-- protobuf generated code -->
-      <Class name="~org\.apache\.hadoop\.ipc\.protobuf\.RpcPayloadHeaderProtos.*"/>
+      <Class name="~org\.apache\.hadoop\.ipc\.protobuf\.RpcHeaderProtos.*"/>
     </Match>
     <Match>
       <!-- protobuf generated code -->
@@ -291,5 +291,13 @@
        <Field name="previousSnapshot" />
        <Bug pattern="IS2_INCONSISTENT_SYNC" />
      </Match>
-
+     <!--
+       The method uses a generic type T that extends two other types
+       T1 and T2. Findbugs complains of a cast from T1 to T2.
+     -->
+     <Match>
+       <Class name="org.apache.hadoop.fs.DelegationTokenRenewer" />
+       <Method name="removeRenewAction" />
+       <Bug pattern="BC_UNCONFIRMED_CAST" />
+     </Match>
  </FindBugsFilter>

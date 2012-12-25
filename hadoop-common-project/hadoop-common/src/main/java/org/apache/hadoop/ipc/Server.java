@@ -80,7 +80,8 @@ import org.apache.hadoop.ipc.RPC.VersionMismatch;
 import org.apache.hadoop.ipc.metrics.RpcDetailedMetrics;
 import org.apache.hadoop.ipc.metrics.RpcMetrics;
 import org.apache.hadoop.ipc.protobuf.IpcConnectionContextProtos.IpcConnectionContextProto;
-import org.apache.hadoop.ipc.protobuf.RpcPayloadHeaderProtos.*;
+import org.apache.hadoop.ipc.protobuf.RpcHeaderProtos.RpcResponseHeaderProto.RpcStatusProto;
+import org.apache.hadoop.ipc.protobuf.RpcHeaderProtos.*;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.security.AccessControlException;
 import org.apache.hadoop.security.SaslRpcServer;
@@ -160,7 +161,7 @@ public abstract class Server {
   public static final ByteBuffer HEADER = ByteBuffer.wrap("hrpc".getBytes());
   
   /**
-   * Serialization type for ConnectionContext and RpcPayloadHeader
+   * Serialization type for ConnectionContext and RpcRequestHeader
    */
   public enum IpcSerializationType {
     // Add new serialization type to the end without affecting the enum order
@@ -197,9 +198,10 @@ public abstract class Server {
   // 4 : Introduced SASL security layer
   // 5 : Introduced use of {@link ArrayPrimitiveWritable$Internal}
   //     in ObjectWritable to efficiently transmit arrays of primitives
-  // 6 : Made RPC payload header explicit
+  // 6 : Made RPC Request header explicit
   // 7 : Changed Ipc Connection Header to use Protocol buffers
-  public static final byte CURRENT_VERSION = 7;
+  // 8 : SASL server always sends a final response
+  public static final byte CURRENT_VERSION = 8;
 
   /**
    * Initial and max size of response buffer
@@ -1220,8 +1222,8 @@ public abstract class Server {
           AUDITLOG.warn(AUTH_FAILED_FOR + clientIP + ":" + attemptingUser);
           throw e;
         }
-        if (replyToken == null && authMethod == AuthMethod.PLAIN) {
-          // client needs at least response to know if it should use SIMPLE
+        if (saslServer.isComplete() && replyToken == null) {
+          // send final response for success
           replyToken = new byte[0];
         }
         if (replyToken != null) {
@@ -1392,7 +1394,7 @@ public abstract class Server {
     }
 
     private AuthMethod initializeAuthContext(AuthMethod authMethod)
-        throws IOException {
+        throws IOException, InterruptedException {
       try {
         if (enabledAuthMethods.contains(authMethod)) {
           saslServer = createSaslServer(authMethod);
@@ -1425,8 +1427,7 @@ public abstract class Server {
     }
 
     private SaslServer createSaslServer(AuthMethod authMethod)
-        throws IOException {
-      SaslServer saslServer = null;
+        throws IOException, InterruptedException {
       String hostname = null;
       String saslProtocol = null;
       CallbackHandler saslCallback = null;
@@ -1462,10 +1463,23 @@ public abstract class Server {
               "Server does not support SASL " + authMethod);
       }
       
-      String mechanism = authMethod.getMechanismName();
-      saslServer = Sasl.createSaslServer(
-          mechanism, saslProtocol, hostname,
-          SaslRpcServer.SASL_PROPS, saslCallback);
+      return createSaslServer(authMethod.getMechanismName(), saslProtocol,
+                              hostname, saslCallback);                                    
+    }
+
+    private SaslServer createSaslServer(final String mechanism,
+                                        final String protocol,
+                                        final String hostname,
+                                        final CallbackHandler callback
+        ) throws IOException, InterruptedException {
+      SaslServer saslServer = UserGroupInformation.getCurrentUser().doAs(
+          new PrivilegedExceptionAction<SaslServer>() {
+            @Override
+            public SaslServer run() throws SaslException  {
+              return Sasl.createSaslServer(mechanism, protocol, hostname,
+                                           SaslRpcServer.SASL_PROPS, callback);
+            }
+          });
       if (saslServer == null) {
         throw new AccessControlException(
             "Unable to find SASL server implementation for " + mechanism);
@@ -1624,14 +1638,15 @@ public abstract class Server {
     private void processData(byte[] buf) throws  IOException, InterruptedException {
       DataInputStream dis =
         new DataInputStream(new ByteArrayInputStream(buf));
-      RpcPayloadHeaderProto header = RpcPayloadHeaderProto.parseDelimitedFrom(dis);
+      RpcRequestHeaderProto header = RpcRequestHeaderProto.parseDelimitedFrom(dis);
         
       if (LOG.isDebugEnabled())
         LOG.debug(" got #" + header.getCallId());
       if (!header.hasRpcOp()) {
-        throw new IOException(" IPC Server: No rpc op in rpcPayloadHeader");
+        throw new IOException(" IPC Server: No rpc op in rpcRequestHeader");
       }
-      if (header.getRpcOp() != RpcPayloadOperationProto.RPC_FINAL_PAYLOAD) {
+      if (header.getRpcOp() != 
+          RpcRequestHeaderProto.OperationProto.RPC_FINAL_PACKET) {
         throw new IOException("IPC Server does not implement operation" + 
               header.getRpcOp());
       }
@@ -1639,7 +1654,7 @@ public abstract class Server {
       // (Note it would make more sense to have the handler deserialize but 
       // we continue with this original design.
       if (!header.hasRpcKind()) {
-        throw new IOException(" IPC Server: No rpc kind in rpcPayloadHeader");
+        throw new IOException(" IPC Server: No rpc kind in rpcRequestHeader");
       }
       Class<? extends Writable> rpcRequestClass = 
           getRpcRequestWrapper(header.getRpcKind());

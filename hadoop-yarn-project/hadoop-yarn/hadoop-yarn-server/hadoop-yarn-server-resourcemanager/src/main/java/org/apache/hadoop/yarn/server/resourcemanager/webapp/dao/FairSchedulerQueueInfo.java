@@ -18,20 +18,18 @@
 
 package org.apache.hadoop.yarn.server.resourcemanager.webapp.dao;
 
+
+import java.util.ArrayList;
 import java.util.Collection;
 
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.server.resourcemanager.resource.Resources;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FSLeafQueue;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FSQueue;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FSQueueSchedulable;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FSSchedulerApp;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.QueueManager;
 
-public class FairSchedulerQueueInfo {
-  private int numPendingApps;
-  private int numActiveApps;
-  
+public class FairSchedulerQueueInfo {  
   private int fairShare;
   private int minShare;
   private int maxShare;
@@ -49,17 +47,9 @@ public class FairSchedulerQueueInfo {
   
   private String queueName;
   
+  private Collection<FairSchedulerQueueInfo> childInfos;
+  
   public FairSchedulerQueueInfo(FSQueue queue, FairScheduler scheduler) {
-    Collection<FSSchedulerApp> apps = queue.getApplications();
-    for (FSSchedulerApp app : apps) {
-      if (app.isPending()) {
-        numPendingApps++;
-      } else {
-        numActiveApps++;
-      }
-    }
-    
-    FSQueueSchedulable schedulable = queue.getQueueSchedulable();
     QueueManager manager = scheduler.getQueueManager();
     
     queueName = queue.getName();
@@ -67,11 +57,11 @@ public class FairSchedulerQueueInfo {
     Resource clusterMax = scheduler.getClusterCapacity();
     clusterMaxMem = clusterMax.getMemory();
     
-    usedResources = schedulable.getResourceUsage();
+    usedResources = queue.getResourceUsage();
     fractionUsed = (float)usedResources.getMemory() / clusterMaxMem;
     
-    fairShare = schedulable.getFairShare().getMemory();
-    minResources = schedulable.getMinShare();
+    fairShare = queue.getFairShare().getMemory();
+    minResources = queue.getMinShare();
     minShare = minResources.getMemory();
     maxResources = scheduler.getQueueManager().getMaxResources(queueName);
     if (maxResources.getMemory() > clusterMaxMem) {
@@ -83,6 +73,16 @@ public class FairSchedulerQueueInfo {
     fractionMinShare = (float)minShare / clusterMaxMem;
     
     maxApps = manager.getQueueMaxApps(queueName);
+    
+    Collection<FSQueue> childQueues = queue.getChildQueues();
+    childInfos = new ArrayList<FairSchedulerQueueInfo>();
+    for (FSQueue child : childQueues) {
+      if (child instanceof FSLeafQueue) {
+        childInfos.add(new FairSchedulerLeafQueueInfo((FSLeafQueue)child, scheduler));
+      } else {
+        childInfos.add(new FairSchedulerQueueInfo(child, scheduler));
+      }
+    }
   }
   
   /**
@@ -98,15 +98,7 @@ public class FairSchedulerQueueInfo {
   public int getFairShare() {
     return fairShare;
   }
-  
-  public int getNumActiveApplications() {
-    return numPendingApps;
-  }
-  
-  public int getNumPendingApplications() {
-    return numActiveApps;
-  }
-  
+    
   public Resource getMinResources() {
     return minResources;
   }
@@ -149,5 +141,9 @@ public class FairSchedulerQueueInfo {
    */
   public float getMaxResourcesFraction() {
     return (float)maxShare / clusterMaxMem;
+  }
+  
+  public Collection<FairSchedulerQueueInfo> getChildQueues() {
+    return childInfos;
   }
 }

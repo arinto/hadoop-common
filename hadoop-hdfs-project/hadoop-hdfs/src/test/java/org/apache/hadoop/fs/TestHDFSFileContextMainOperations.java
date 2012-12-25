@@ -49,6 +49,8 @@ public class TestHDFSFileContextMainOperations extends
   @BeforeClass
   public static void clusterSetupAtBegining() throws IOException,
       LoginException, URISyntaxException {
+    FileContextTestHelper.TEST_ROOT_DIR =
+      "/tmp/TestHDFSFileContextMainOperations";
     cluster = new MiniDFSCluster.Builder(CONF).numDataNodes(2).build();
     cluster.waitClusterUp();
     fc = FileContext.getFileContext(cluster.getURI(0), CONF);
@@ -253,7 +255,22 @@ public class TestHDFSFileContextMainOperations extends
     Assert.assertFalse(fs.exists(src1));   // ensure src1 is already renamed
     Assert.assertTrue(fs.exists(dst1));    // ensure rename dst exists
   }
-  
+
+  @Test
+  public void testIsValidNameInvalidNames() {
+    String[] invalidNames = {
+      "/foo/../bar",
+      "/foo/./bar",
+      "/foo/:/bar",
+      "/foo:bar"
+    };
+
+    for (String invalidName: invalidNames) {
+      Assert.assertFalse(invalidName + " is not valid",
+        fc.getDefaultFileSystem().isValidName(invalidName));
+    }
+  }
+
   private void oldRename(Path src, Path dst, boolean renameSucceeds,
       boolean exception) throws Exception {
     DistributedFileSystem fs = (DistributedFileSystem) cluster.getFileSystem();
