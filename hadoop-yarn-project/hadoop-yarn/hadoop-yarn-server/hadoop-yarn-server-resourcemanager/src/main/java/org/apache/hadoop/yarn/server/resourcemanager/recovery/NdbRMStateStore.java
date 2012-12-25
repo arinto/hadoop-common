@@ -124,7 +124,6 @@ public class NdbRMStateStore extends RMStateStore {
 
     @Override
     protected void storeApplicationAttemptState(String attemptId, byte[] attemptStateData) throws Exception {
-        //TODO: persist to NDB
         ApplicationAttemptId appAttemptId = 
                 ConverterUtils.toApplicationAttemptId(attemptId);
         
@@ -137,19 +136,61 @@ public class NdbRMStateStore extends RMStateStore {
                 appAttemptId.getApplicationId().getClusterTimestamp());
         
         storedAttempt.setAppAttemptState(attemptStateData);
-
+        
         //Write NdbAttemptState to ndb database
         _session.persist(storedAttempt);
     }
 
     @Override
     protected void removeApplicationState(String appId) throws Exception {
-        //TODO: remove from NDB
+        
+        //Query the corresponding attempt to be deleted
+        QueryBuilder builder = _session.getQueryBuilder();
+        QueryDomainType<NdbAttemptStateCJ> domainAttempt = 
+                builder.createQueryDefinition(NdbAttemptStateCJ.class);
+        domainAttempt.where(domainAttempt.get("applicationid").equal(
+                domainAttempt.param("applicationid")));
+        domainAttempt.where(domainAttempt.get("clustertimestamp").equal(
+                domainAttempt.param("clustertimestamp")));
+        
+        Query<NdbAttemptStateCJ> queryAttempt = _session.createQuery(domainAttempt);
+        ApplicationId applicationId = ConverterUtils.toApplicationId(appId);
+        
+        queryAttempt.setParameter("applicationid", applicationId.getId());
+        queryAttempt.setParameter("clustertimestamp", applicationId.getClusterTimestamp());
+        
+        List<NdbAttemptStateCJ> resultsAttempt = queryAttempt.getResultList();
+        _session.deletePersistentAll(resultsAttempt);
+   
+        //Construct ApplicationState table's PK
+        Integer intAppId = new Integer(applicationId.getId());
+        Long longClusterTs = new Long(applicationId.getClusterTimestamp());
+        Object[] primaryKey = {intAppId, longClusterTs}; 
+   
+        NdbApplicationStateCJ appState = _session.find(NdbApplicationStateCJ.class, 
+                primaryKey);
+        _session.deletePersistent(NdbApplicationStateCJ.class, appState);
+
     }
 
     @Override
     protected void removeApplicationAttemptState(String attemptId) throws Exception {
-        //TODO: remove from NDB
+        ApplicationAttemptId appAttemptId =
+                ConverterUtils.toApplicationAttemptId(attemptId);
+        
+        Integer intAttemptId = new Integer(appAttemptId.getAttemptId());
+        Integer intAppId = new Integer(appAttemptId.getApplicationId().getId());
+        Long longClusterTs = new Long(appAttemptId.getApplicationId().
+                getClusterTimestamp());
+        
+        Object[] primaryKey = {intAttemptId, intAppId, longClusterTs};
+        NdbAttemptStateCJ attempt = 
+                _session.find(NdbAttemptStateCJ.class, primaryKey);
+        
+        if(attempt != null)
+        {
+            _session.deletePersistent(NdbAttemptStateCJ.class, attempt);
+        }     
     }
 
     public class NdbRMState extends RMState {
@@ -174,7 +215,6 @@ public class NdbRMStateStore extends RMStateStore {
             List<NdbApplicationStateCJ> resultsApp;
             List<NdbAttemptStateCJ> resultsAttempt;
 
-
             //Retrieve applicationstate table
             QueryBuilder builder = _session.getQueryBuilder();
             domainApp = builder.createQueryDefinition(NdbApplicationStateCJ.class);
@@ -198,8 +238,11 @@ public class NdbRMStateStore extends RMStateStore {
                             appStateData.getSubmitTime(),
                             appStateData.getApplicationSubmissionContext());
 
-                    domainAttempt.where(domainAttempt.get("applicationId").equal(
-                            domainAttempt.param("applicationId")));
+                    domainAttempt.where(domainAttempt.get("applicationid").equal(
+                            domainAttempt.param("applicationid")));
+                    domainAttempt.where(domainAttempt.get("clustertimestamp").equal(
+                            domainAttempt.param("clustertimestamp")));
+                    
                     queryAttempt = _session.createQuery(domainAttempt);
                     queryAttempt.setParameter("applicationId",storedApp.getId());
                     queryAttempt.setParameter("clustertimestamp",storedApp.getClusterTimeStamp());
