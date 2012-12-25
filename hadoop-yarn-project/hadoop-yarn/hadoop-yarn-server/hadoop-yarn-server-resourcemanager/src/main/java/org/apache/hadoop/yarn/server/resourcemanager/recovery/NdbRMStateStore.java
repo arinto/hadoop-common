@@ -22,7 +22,6 @@ import com.mysql.clusterj.Session;
 import com.mysql.clusterj.SessionFactory;
 import com.mysql.clusterj.annotation.PersistenceCapable;
 import com.mysql.clusterj.annotation.PrimaryKey;
-import com.mysql.clusterj.annotation.Lob;
 import com.mysql.clusterj.query.QueryBuilder;
 import com.mysql.clusterj.query.QueryDomainType;
 import java.io.File;
@@ -39,42 +38,104 @@ import java.util.logging.Logger;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
-import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
-import org.apache.hadoop.yarn.api.records.Container;
 import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationAttemptIdPBImpl;
 import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationAttemptStateDataPBImpl;
 import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationIdPBImpl;
 import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationStateDataPBImpl;
-import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationSubmissionContextPBImpl;
-import org.apache.hadoop.yarn.api.records.impl.pb.ContainerPBImpl;
-import org.apache.hadoop.yarn.event.Dispatcher;
 import org.apache.hadoop.yarn.proto.YarnProtos;
-import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMApp;
-import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.RMAppAttempt;
-import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.RMAppAttemptEvent;
-import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.RMAppAttemptEventType;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 
 /**
  *
- * @author aknahs
+ * @author aknahs, arinto
  */
 public class NdbRMStateStore extends RMStateStore {
 
-    Dispatcher dispatcher;
+    public class NdbRMState extends RMState {
+
+        public NdbRMState() {
+            populate();
+        }
+
+        @Override
+        public Map<ApplicationId, ApplicationState> getApplicationState() {
+            populate();
+            return appState;
+        }
+
+        private void populate() {
+            appState = new HashMap<ApplicationId, ApplicationState>();
+           
+            //Retrieve list of application state
+            QueryBuilder builder = _session.getQueryBuilder();
+            QueryDomainType<NdbApplicationStateCJ> domainApp = 
+                    builder.createQueryDefinition(NdbApplicationStateCJ.class);;
+            Query<NdbApplicationStateCJ> queryApp = 
+                    _session.createQuery(domainApp);
+            List<NdbApplicationStateCJ> resultsApp = queryApp.getResultList();
+             
+            //prepare local variable for loading attempts
+            QueryDomainType<NdbAttemptStateCJ> domainAttempt = 
+                    builder.createQueryDefinition(NdbAttemptStateCJ.class);
+            domainAttempt.where(domainAttempt.get("applicationid").equal(
+                    domainAttempt.param("applicationid")));
+            domainAttempt.where(domainAttempt.get("clustertimestamp").equal(
+                    domainAttempt.param("clustertimestamp")));
+            
+            //Populate appState
+            for (NdbApplicationStateCJ storedApp : resultsApp) {
+                try {
+                    ApplicationId id = new ApplicationIdPBImpl();
+                    id.setId(storedApp.getId());
+                    id.setClusterTimestamp(storedApp.getClusterTimeStamp());
+
+                    ApplicationStateDataPBImpl appStateData =
+                            new ApplicationStateDataPBImpl(
+                            YarnProtos.ApplicationStateDataProto.parseFrom(
+                            storedApp.getAppState()));
+
+                    ApplicationState state = new ApplicationState(
+                            appStateData.getSubmitTime(),
+                            appStateData.getApplicationSubmissionContext());
+
+                    Query<NdbAttemptStateCJ> queryAttempt = 
+                            _session.createQuery(domainAttempt);
+                    queryAttempt.setParameter("applicationId", storedApp.getId());
+                    queryAttempt.setParameter("clustertimestamp", 
+                            storedApp.getClusterTimeStamp());
+                    
+                    List<NdbAttemptStateCJ> resultsAttempt = 
+                            queryAttempt.getResultList();
+
+                    for (NdbAttemptStateCJ storedAttempt : resultsAttempt) {
+                        ApplicationAttemptId attemptId = 
+                                new ApplicationAttemptIdPBImpl();
+                        attemptId.setApplicationId(id);
+                        attemptId.setAttemptId(storedAttempt.getAttemptId());
+
+                        ApplicationAttemptStateDataPBImpl attemptStateData =
+                                new ApplicationAttemptStateDataPBImpl(
+                                YarnProtos.ApplicationAttemptStateDataProto.parseFrom(
+                                storedAttempt.getAppAttemptState()));
+                        ApplicationAttemptState attemptState = new ApplicationAttemptState(
+                                attemptId, attemptStateData.getMasterContainer());
+
+                        state.attempts.put(attemptId, attemptState);
+                    }
+
+                    appState.put(id, state);
+                } catch (InvalidProtocolBufferException ex) {
+                    Logger.getLogger(NdbRMStateStore.class.getName()).log(Level.SEVERE, null, ex);
+                }
+            }
+        }
+    }
+   
     private SessionFactory _factory;
     private Session _session;
-
-    @Override
-    public void setDispatcher(Dispatcher dispatcher) {
-        this.dispatcher = dispatcher;
-    }
-
+    
     @Override
     public RMState loadState() {
-        //this method is used during recovery, so we need to populate states 
-        //from the database!
-        //TODO: revisit this method
         return new NdbRMState();
     }
 
@@ -143,32 +204,38 @@ public class NdbRMStateStore extends RMStateStore {
 
     @Override
     protected void removeApplicationState(String appId) throws Exception {
+        //Construct ApplicationState table's PK
+        ApplicationId applicationId = ConverterUtils.toApplicationId(appId);
+        Integer intAppId = new Integer(applicationId.getId());
+        Long longClusterTs = new Long(applicationId.getClusterTimestamp());
+        Object[] primaryKey = {intAppId, longClusterTs};
+
+        NdbApplicationStateCJ appState = _session.find(NdbApplicationStateCJ.class,
+                primaryKey);
         
-        //Query the corresponding attempt to be deleted
+        if(appState == null)
+        {
+            //does not need to continue if application state is not valid
+            return;
+        }
+
+        //Delete the attempts first, query the corresponding attempt to be deleted
         QueryBuilder builder = _session.getQueryBuilder();
-        QueryDomainType<NdbAttemptStateCJ> domainAttempt = 
+        QueryDomainType<NdbAttemptStateCJ> domainAttempt =
                 builder.createQueryDefinition(NdbAttemptStateCJ.class);
         domainAttempt.where(domainAttempt.get("applicationid").equal(
                 domainAttempt.param("applicationid")));
         domainAttempt.where(domainAttempt.get("clustertimestamp").equal(
                 domainAttempt.param("clustertimestamp")));
-        
+
         Query<NdbAttemptStateCJ> queryAttempt = _session.createQuery(domainAttempt);
-        ApplicationId applicationId = ConverterUtils.toApplicationId(appId);
-        
         queryAttempt.setParameter("applicationid", applicationId.getId());
         queryAttempt.setParameter("clustertimestamp", applicationId.getClusterTimestamp());
-        
+
         List<NdbAttemptStateCJ> resultsAttempt = queryAttempt.getResultList();
         _session.deletePersistentAll(resultsAttempt);
-   
-        //Construct ApplicationState table's PK
-        Integer intAppId = new Integer(applicationId.getId());
-        Long longClusterTs = new Long(applicationId.getClusterTimestamp());
-        Object[] primaryKey = {intAppId, longClusterTs}; 
-   
-        NdbApplicationStateCJ appState = _session.find(NdbApplicationStateCJ.class, 
-                primaryKey);
+
+        //Delete the application state
         _session.deletePersistent(NdbApplicationStateCJ.class, appState);
 
     }
@@ -183,6 +250,7 @@ public class NdbRMStateStore extends RMStateStore {
         Long longClusterTs = new Long(appAttemptId.getApplicationId().
                 getClusterTimestamp());
         
+        
         Object[] primaryKey = {intAttemptId, intAppId, longClusterTs};
         NdbAttemptStateCJ attempt = 
                 _session.find(NdbAttemptStateCJ.class, primaryKey);
@@ -191,84 +259,6 @@ public class NdbRMStateStore extends RMStateStore {
         {
             _session.deletePersistent(NdbAttemptStateCJ.class, attempt);
         }     
-    }
-
-    public class NdbRMState extends RMState {
-
-        public NdbRMState() {
-            populate();
-        }
-
-        @Override
-        public Map<ApplicationId, ApplicationState> getApplicationState() {
-            populate();
-            return appState; 
-        }
-        
-        private void populate()
-        {
-            appState = new HashMap<ApplicationId, ApplicationState>();
-            QueryDomainType<NdbApplicationStateCJ> domainApp;
-            QueryDomainType<NdbAttemptStateCJ> domainAttempt;
-            Query<NdbApplicationStateCJ> queryApp;
-            Query<NdbAttemptStateCJ> queryAttempt;
-            List<NdbApplicationStateCJ> resultsApp;
-            List<NdbAttemptStateCJ> resultsAttempt;
-
-            //Retrieve applicationstate table
-            QueryBuilder builder = _session.getQueryBuilder();
-            domainApp = builder.createQueryDefinition(NdbApplicationStateCJ.class);
-            domainAttempt = builder.createQueryDefinition(NdbAttemptStateCJ.class);
-            queryApp = _session.createQuery(domainApp);
-            resultsApp = queryApp.getResultList();
-
-            //Populate appState
-            for (NdbApplicationStateCJ storedApp : resultsApp) {
-                try {
-                    ApplicationId id = new ApplicationIdPBImpl();
-                    id.setId(storedApp.getId());
-                    id.setClusterTimestamp(storedApp.getClusterTimeStamp());
-                    
-                    ApplicationStateDataPBImpl appStateData =
-                            new ApplicationStateDataPBImpl(
-                            YarnProtos.ApplicationStateDataProto.parseFrom(
-                            storedApp.getAppState()));
-                    
-                    ApplicationState state = new ApplicationState(
-                            appStateData.getSubmitTime(),
-                            appStateData.getApplicationSubmissionContext());
-
-                    domainAttempt.where(domainAttempt.get("applicationid").equal(
-                            domainAttempt.param("applicationid")));
-                    domainAttempt.where(domainAttempt.get("clustertimestamp").equal(
-                            domainAttempt.param("clustertimestamp")));
-                    
-                    queryAttempt = _session.createQuery(domainAttempt);
-                    queryAttempt.setParameter("applicationId",storedApp.getId());
-                    queryAttempt.setParameter("clustertimestamp",storedApp.getClusterTimeStamp());
-                    resultsAttempt = queryAttempt.getResultList();
-                    
-                    for (NdbAttemptStateCJ storedAttempt : resultsAttempt) {
-                        ApplicationAttemptId attemptId = new ApplicationAttemptIdPBImpl();
-                        attemptId.setApplicationId(id);
-                        attemptId.setAttemptId(storedAttempt.getAttemptId());
-                        
-                        ApplicationAttemptStateDataPBImpl attemptStateData =
-                                new ApplicationAttemptStateDataPBImpl(
-                                YarnProtos.ApplicationAttemptStateDataProto.parseFrom(
-                                storedAttempt.getAppAttemptState()));
-                        ApplicationAttemptState attemptState = new ApplicationAttemptState(
-                                attemptId, attemptStateData.getMasterContainer());
-    
-                        state.attempts.put(attemptId, attemptState);
-                    }
-                    
-                    appState.put(id, state);
-                } catch (InvalidProtocolBufferException ex) {
-                    Logger.getLogger(NdbRMStateStore.class.getName()).log(Level.SEVERE, null, ex);
-                }
-            }
-        }
     }
 
     public void clearData()
