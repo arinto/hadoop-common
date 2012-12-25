@@ -69,7 +69,7 @@ public class TestRMRestart {
     am0.unregisterAppAttempt();
     nm1.nodeHeartbeat(attempt0.getAppAttemptId(), 1, ContainerState.COMPLETE);
     am0.waitForState(RMAppAttemptState.FINISHED);    
-
+    rm1.waitForState(app0.getApplicationId(), RMAppState.FINISHED);
     // spot check that app is not saved anymore
     Assert.assertEquals(0, rmAppState.size());
         
@@ -248,6 +248,7 @@ public class TestRMRestart {
 
     //request for containers
     am1.allocate("h1" , 1000, 3, new ArrayList<ContainerId>());
+    am2.allocate("h2" , 1000, 1, new ArrayList<ContainerId>());
     
     // verify container allocate continues to work
     nm1.nodeHeartbeat(true);
@@ -255,6 +256,8 @@ public class TestRMRestart {
     conts = am1.allocate(new ArrayList<ResourceRequest>(),
         new ArrayList<ContainerId>()).getAllocatedContainers();
     while (conts.size() == 0) {
+      nm1.nodeHeartbeat(true);
+      nm2.nodeHeartbeat(true);
       conts.addAll(am1.allocate(new ArrayList<ResourceRequest>(),
           new ArrayList<ContainerId>()).getAllocatedContainers());
       Thread.sleep(500);

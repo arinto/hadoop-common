@@ -78,10 +78,10 @@ public class NdbRMStateStore extends RMStateStore {
             //prepare local variable for loading attempts
             QueryDomainType<NdbAttemptStateCJ> domainAttempt = 
                     builder.createQueryDefinition(NdbAttemptStateCJ.class);
-            domainAttempt.where(domainAttempt.get("applicationid").equal(
-                    domainAttempt.param("applicationid")));
-            domainAttempt.where(domainAttempt.get("clustertimestamp").equal(
-                    domainAttempt.param("clustertimestamp")));
+            domainAttempt.where(domainAttempt.get("applicationId").equal(
+                    domainAttempt.param("applicationId")));
+            domainAttempt.where(domainAttempt.get("clusterTimeStamp").equal(
+                    domainAttempt.param("clusterTimeStamp")));
             
             //Populate appState
             for (NdbApplicationStateCJ storedApp : resultsApp) {
@@ -102,7 +102,7 @@ public class NdbRMStateStore extends RMStateStore {
                     Query<NdbAttemptStateCJ> queryAttempt = 
                             _session.createQuery(domainAttempt);
                     queryAttempt.setParameter("applicationId", storedApp.getId());
-                    queryAttempt.setParameter("clustertimestamp", 
+                    queryAttempt.setParameter("clusterTimeStamp", 
                             storedApp.getClusterTimeStamp());
                     
                     List<NdbAttemptStateCJ> resultsAttempt = 
@@ -230,21 +230,20 @@ public class NdbRMStateStore extends RMStateStore {
         QueryBuilder builder = _session.getQueryBuilder();
         QueryDomainType<NdbAttemptStateCJ> domainAttempt =
                 builder.createQueryDefinition(NdbAttemptStateCJ.class);
-        domainAttempt.where(domainAttempt.get("applicationid").equal(
-                domainAttempt.param("applicationid")));
-        domainAttempt.where(domainAttempt.get("clustertimestamp").equal(
-                domainAttempt.param("clustertimestamp")));
+        domainAttempt.where(domainAttempt.get("applicationId").equal(
+                domainAttempt.param("applicationId")));
+        domainAttempt.where(domainAttempt.get("clusterTimeStamp").equal(
+                domainAttempt.param("clusterTimeStamp")));
 
         Query<NdbAttemptStateCJ> queryAttempt = _session.createQuery(domainAttempt);
-        queryAttempt.setParameter("applicationid", applicationId.getId());
-        queryAttempt.setParameter("clustertimestamp", applicationId.getClusterTimestamp());
+        queryAttempt.setParameter("applicationId", applicationId.getId());
+        queryAttempt.setParameter("clusterTimeStamp", applicationId.getClusterTimestamp());
 
         List<NdbAttemptStateCJ> resultsAttempt = queryAttempt.getResultList();
         _session.deletePersistentAll(resultsAttempt);
 
         //Delete the application state
-        _session.deletePersistent(NdbApplicationStateCJ.class, appState);
-
+        _session.deletePersistent(appState);
     }
 
     @Override
@@ -289,7 +288,7 @@ public class NdbRMStateStore extends RMStateStore {
         void setAppState(byte[] context);
     }
 
-    @PersistenceCapable(table = "attemptstate")
+    @PersistenceCapable(table = "applicationattempt")
     public interface NdbAttemptStateCJ {
 
         @PrimaryKey
