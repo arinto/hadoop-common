@@ -231,6 +231,27 @@ public class YarnConfiguration extends Configuration {
   /** The class to use as the persistent store.*/
   public static final String RM_STORE = RM_PREFIX + "store.class";
   
+  /** HostPort of ZK server for ZKRMStateStore */
+  public static final String ZK_RM_STATE_STORE_ADDRESS =
+                                       RM_PREFIX + "zk.rm-state-store.address";
+  /** Timeout in millisec for ZK server connection for ZKRMStateStore */
+  public static final String ZK_RM_STATE_STORE_TIMEOUT_MS =
+                                    RM_PREFIX + "zk.rm-state-store.timeout.ms";
+  public static final int DEFAULT_ZK_RM_STATE_STORE_TIMEOUT_MS = 60000;
+  /** Parent znode path under which ZKRMStateStore will create znodes */
+  public static final String ZK_RM_STATE_STORE_PARENT_PATH =
+                                   RM_PREFIX + "zk.rm-state-store.parent-path";
+  public static final String DEFAULT_ZK_RM_STATE_STORE_PARENT_PATH = "";
+  /** ACL for znodes in ZKRMStateStore */
+  public static final String ZK_RM_STATE_STORE_ACL =
+                                           RM_PREFIX + "zk.rm-state-store.acl";
+  public static final String DEFAULT_ZK_RM_STATE_STORE_ACL =
+                                                          "world:anyone:rwcda";
+
+  /** URI for FileSystemRMStateStore */
+  public static final String FS_RM_STATE_STORE_URI =
+                                           RM_PREFIX + "fs.rm-state-store.uri";
+  
   /** The maximum number of completed applications RM keeps. */ 
   public static final String RM_MAX_COMPLETED_APPLICATIONS =
     RM_PREFIX + "max-completed-applications";

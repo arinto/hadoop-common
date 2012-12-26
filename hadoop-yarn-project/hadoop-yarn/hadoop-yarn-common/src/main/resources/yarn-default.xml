@@ -214,8 +214,54 @@
   <property>
     <description>The class to use as the persistent store.</description>
     <name>yarn.resourcemanager.store.class</name>
+    <value>org.apache.hadoop.yarn.server.resourcemanager.recovery.FileSystemRMStateStore</value>
   </property>
 
+  <property>
+    <description>URI pointing to the location of the FileSystem path where
+    RM state will be stored. This must be supplied when using 
+    org.apache.hadoop.yarn.server.resourcemanager.recovery.FileSystemRMStateStore
+    as the value for yarn.resourcemanager.store.class</description>
+    <name>yarn.resourcemanager.fs.rm-state-store.uri</name>
+    <value>${hadoop.tmp.dir}/yarn/system/rmstore</value>
+    <!--value>hdfs://localhost:9000/rmstore</value-->
+  </property>
+
+  <property>
+    <description>HostPort of the ZooKeeper server when using 
+    org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore
+    as the value for yarn.resourcemanager.store.class</description>
+    <name>yarn.resourcemanager.zk.rm-state-store.address</name>
+    <!--value>127.0.0.1:2181</value-->
+  </property>
+
+  <property>
+    <description>Full path of the ZooKeeper znode where RM state will be 
+    stored. This must be supplied when using
+    org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore
+    as the value for yarn.resourcemanager.store.class</description>
+    <name>yarn.resourcemanager.zk.rm-state-store.parent-path</name>
+    <!--value>/rmstore</value-->
+  </property>
+
+  <property>
+    <description>Timeout when connecting to ZooKeeper.
+    This may be supplied when using
+    org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore
+    as the value for yarn.resourcemanager.store.class</description>
+    <name>yarn.resourcemanager.zk.rm-state-store.timeout.ms</name>
+    <!--value>60000</value-->
+  </property>
+  
+  <property>
+    <description>ACL's to be used for ZooKeeper znodes.
+    This may be supplied when using
+    org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore
+    as the value for yarn.resourcemanager.store.class</description>
+    <name>yarn.resourcemanager.zk.rm-state-store.timeout.ms</name>
+    <!--value>world:anyone:rwcda</value-->
+  </property>
+  
   <property>
     <description>The maximum number of completed applications RM keeps. </description>
     <name>yarn.resourcemanager.max-completed-applications</name>
