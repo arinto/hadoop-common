@@ -74,6 +74,12 @@
       <type>test-jar</type>
       <scope>test</scope>
     </dependency>
+    <dependency>
+       <groupId>se.sics.ndb</groupId>
+       <artifactId>clusterj</artifactId>
+       <version>7.1.15a</version>
+       <type>jar</type>
+    </dependency>
   </dependencies>
 
   <build>
@@ -140,6 +146,19 @@
               </execution>
             </executions>
           </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <configuration>
+                <properties>
+                    <property>
+                        <name>listener</name>
+                        <value>org.apache.hadoop.test.TimedOutTestsListener</value>
+                    </property>
+                </properties>
+                <argLine>-Djava.library.path=/home/arinto/sql/mysql/lib</argLine>
+            </configuration>
+            </plugin>
         </plugins>
       </build>
     </profile>
