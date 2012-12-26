@@ -231,6 +231,10 @@ public class YarnConfiguration extends Configuration {
   /** The class to use as the persistent store.*/
   public static final String RM_STORE = RM_PREFIX + "store.class";
   
+  /** The path to clusterj configuration file (clusterj.properties)*/
+  public static final String NDB_RM_STATE_STORE_CONFIG_PATH = 
+                         RM_PREFIX + "ndb.rmstatestore.clusterjpropertiespath";
+  
   /** HostPort of ZK server for ZKRMStateStore */
   public static final String ZK_RM_STATE_STORE_ADDRESS =
                                        RM_PREFIX + "zk.rm-state-store.address";

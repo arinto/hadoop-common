@@ -58,7 +58,7 @@ public class TestNDBRMRestart {
     // PHASE 1: create state in an RM
     
     // start RM
-    MockRM rm1 = new MockRM(conf, true, ndbStore);
+    MockRM rm1 = new MockRM(conf, ndbStore);
     
     // start like normal because state is empty
     rm1.start();
@@ -158,7 +158,7 @@ public class TestNDBRMRestart {
     // PHASE 2: create new RM and start from old state
     
     // create new RM to represent restart
-    MockRM rm2 = new MockRM(conf, true, ndbStore);
+    MockRM rm2 = new MockRM(conf, ndbStore);
     
     // recover state
     rm2.recover(ndbStore.loadState());

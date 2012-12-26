@@ -175,6 +175,21 @@ public class NdbRMStateStore extends RMStateStore {
     }
 
     @Override
+    protected void storeApplicationState(String appId, ApplicationStateDataPBImpl appStateData) throws Exception {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    protected void storeApplicationAttemptState(String attemptId, ApplicationAttemptStateDataPBImpl attemptStateData) throws Exception {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    @Override
+    protected void removeApplicationState(ApplicationState appState) throws Exception {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+    /*
+    @Override
     protected void storeApplicationState(String appId, byte[] appStateData) throws Exception {  
         ApplicationId applicationId = ConverterUtils.toApplicationId(appId);
 
@@ -189,7 +204,9 @@ public class NdbRMStateStore extends RMStateStore {
         
         _session.persist(storedApp);
     }
+    //*/
 
+    /*
     @Override
     protected void storeApplicationAttemptState(String attemptId, byte[] attemptStateData) throws Exception {
         ApplicationAttemptId appAttemptId = 
@@ -208,7 +225,9 @@ public class NdbRMStateStore extends RMStateStore {
         //Write NdbAttemptState to ndb database
         _session.persist(storedAttempt);
     }
+    //*/
 
+    /*
     @Override
     protected void removeApplicationState(String appId) throws Exception {
         //Construct ApplicationState table's PK
@@ -245,7 +264,9 @@ public class NdbRMStateStore extends RMStateStore {
         //Delete the application state
         _session.deletePersistent(appState);
     }
+    //*/
 
+    /*
     @Override
     protected void removeApplicationAttemptState(String attemptId) throws Exception {
         ApplicationAttemptId appAttemptId =
@@ -266,6 +287,7 @@ public class NdbRMStateStore extends RMStateStore {
             _session.deletePersistent(NdbAttemptStateCJ.class, attempt);
         }     
     }
+    //*/
 
     public void clearData()
     {
