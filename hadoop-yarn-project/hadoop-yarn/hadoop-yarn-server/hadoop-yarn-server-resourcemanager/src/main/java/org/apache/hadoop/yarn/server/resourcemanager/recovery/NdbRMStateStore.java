@@ -38,10 +38,14 @@ import java.util.logging.Logger;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
+import org.apache.hadoop.yarn.api.records.Container;
 import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationAttemptIdPBImpl;
 import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationAttemptStateDataPBImpl;
 import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationIdPBImpl;
 import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationStateDataPBImpl;
+import org.apache.hadoop.yarn.api.records.impl.pb.ApplicationSubmissionContextPBImpl;
+import org.apache.hadoop.yarn.api.records.impl.pb.ContainerPBImpl;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.proto.YarnProtos;
 import org.apache.hadoop.yarn.util.ConverterUtils;
@@ -75,14 +79,6 @@ public class NdbRMStateStore extends RMStateStore {
                     _session.createQuery(domainApp);
             List<NdbApplicationStateCJ> resultsApp = queryApp.getResultList();
              
-            //prepare local variable for loading attempts
-            QueryDomainType<NdbAttemptStateCJ> domainAttempt = 
-                    builder.createQueryDefinition(NdbAttemptStateCJ.class);
-            domainAttempt.where(domainAttempt.get("applicationId").equal(
-                    domainAttempt.param("applicationId")));
-            domainAttempt.where(domainAttempt.get("clusterTimeStamp").equal(
-                    domainAttempt.param("clusterTimeStamp")));
-            
             //Populate appState
             for (NdbApplicationStateCJ storedApp : resultsApp) {
                 try {
@@ -90,14 +86,22 @@ public class NdbRMStateStore extends RMStateStore {
                     id.setId(storedApp.getId());
                     id.setClusterTimestamp(storedApp.getClusterTimeStamp());
 
-                    ApplicationStateDataPBImpl appStateData =
-                            new ApplicationStateDataPBImpl(
-                            YarnProtos.ApplicationStateDataProto.parseFrom(
-                            storedApp.getAppState()));
+                    ApplicationSubmissionContext appSubContext =
+                            new ApplicationSubmissionContextPBImpl(
+                            YarnProtos.ApplicationSubmissionContextProto.parseFrom(
+                            storedApp.getAppContext()));
 
                     ApplicationState state = new ApplicationState(
-                            appStateData.getSubmitTime(),
-                            appStateData.getApplicationSubmissionContext());
+                            storedApp.getSubmitTime(),
+                            appSubContext);
+                    
+                    //prepare local variable for loading attempts
+                    QueryDomainType<NdbAttemptStateCJ> domainAttempt =
+                            builder.createQueryDefinition(NdbAttemptStateCJ.class);
+                    domainAttempt.where(domainAttempt.get("applicationId").equal(
+                            domainAttempt.param("applicationId")).and(
+                            domainAttempt.get("clusterTimeStamp").equal(
+                            domainAttempt.param("clusterTimeStamp"))));
 
                     Query<NdbAttemptStateCJ> queryAttempt = 
                             _session.createQuery(domainAttempt);
@@ -113,13 +117,19 @@ public class NdbRMStateStore extends RMStateStore {
                                 new ApplicationAttemptIdPBImpl();
                         attemptId.setApplicationId(id);
                         attemptId.setAttemptId(storedAttempt.getAttemptId());
-
-                        ApplicationAttemptStateDataPBImpl attemptStateData =
-                                new ApplicationAttemptStateDataPBImpl(
-                                YarnProtos.ApplicationAttemptStateDataProto.parseFrom(
-                                storedAttempt.getAppAttemptState()));
-                        ApplicationAttemptState attemptState = new ApplicationAttemptState(
-                                attemptId, attemptStateData.getMasterContainer());
+                        
+                        Container masterContainer = null;
+                        
+                        byte[] containerData = storedAttempt.getMasterContainer();
+                        if (containerData != null) {
+                            masterContainer = new ContainerPBImpl(
+                                    YarnProtos.ContainerProto.parseFrom(
+                                    containerData));
+                        }
+                                
+                        ApplicationAttemptState attemptState = 
+                                new ApplicationAttemptState(
+                                attemptId, masterContainer);
 
                         state.attempts.put(attemptId, attemptState);
                     }
@@ -131,9 +141,54 @@ public class NdbRMStateStore extends RMStateStore {
             }
         }
     }
+    
+    @PersistenceCapable(table = "applicationstate")
+    public interface NdbApplicationStateCJ {
+
+        @PrimaryKey
+        int getId();
+        void setId(int id);
+
+        @PrimaryKey
+        long getClusterTimeStamp();
+        void setClusterTimeStamp(long time);
+        
+        long getSubmitTime();
+        void setSubmitTime(long time);
+        
+        byte[] getAppContext();
+        void setAppContext(byte[] context);
+    }
+
+    @PersistenceCapable(table = "attemptstate")
+    public interface NdbAttemptStateCJ {
+
+        @PrimaryKey
+        int getAttemptId();
+        void setAttemptId(int id);
+
+        @PrimaryKey
+        int getApplicationId();
+        void setApplicationId(int id);
+        
+        @PrimaryKey
+        long getClusterTimeStamp();
+        void setClusterTimeStamp(long time);
+        
+        byte[] getMasterContainer();
+        void setMasterContainer(byte[] state);
+    }
    
     private SessionFactory _factory;
     private Session _session;
+    
+    //utility to check whether an instance can be casted into specific type
+    private static <T> T as (Class<T> clazz, Object o){
+        if(clazz.isInstance(o)){
+            return clazz.cast(o);
+        }
+        return null;
+    }
     
     @Override
     public RMState loadState() {
@@ -175,77 +230,85 @@ public class NdbRMStateStore extends RMStateStore {
     }
 
     @Override
-    protected void storeApplicationState(String appId, ApplicationStateDataPBImpl appStateData) throws Exception {
-        throw new UnsupportedOperationException("Not supported yet.");
+    protected void storeApplicationState(String appId, 
+    ApplicationStateDataPBImpl appStateData) throws Exception {
+    
+        ApplicationId applicationId = ConverterUtils.toApplicationId(appId);
+
+        //create Ndb-related instance
+        NdbApplicationStateCJ storedApp =
+                _session.newInstance(NdbApplicationStateCJ.class);
+        
+        storedApp.setId(applicationId.getId());
+        storedApp.setClusterTimeStamp(applicationId.getClusterTimestamp());
+        storedApp.setSubmitTime(appStateData.getSubmitTime());
+        ApplicationSubmissionContext appSubContext = 
+                appStateData.getApplicationSubmissionContext();
+        
+        ApplicationSubmissionContextPBImpl appSubContextPbImpl = 
+                as(ApplicationSubmissionContextPBImpl.class, appSubContext);
+        
+        if(appSubContextPbImpl == null){
+            throw new NullPointerException("Invalid applicationSubmissionContext data");
+        }
+        
+        storedApp.setAppContext(appSubContextPbImpl.getProto().toByteArray());
+        
+        _session.persist(storedApp);
+               
     }
 
     @Override
-    protected void storeApplicationAttemptState(String attemptId, ApplicationAttemptStateDataPBImpl attemptStateData) throws Exception {
-        throw new UnsupportedOperationException("Not supported yet.");
+    protected void storeApplicationAttemptState(String attemptId, 
+    ApplicationAttemptStateDataPBImpl attemptStateData) throws Exception {
+    
+        ApplicationAttemptId appAttemptId = 
+                ConverterUtils.toApplicationAttemptId(attemptId);
+        
+        //create Ndb-related instance
+        NdbAttemptStateCJ storedAttempt = 
+                _session.newInstance(NdbAttemptStateCJ.class);
+        
+        storedAttempt.setAttemptId(appAttemptId.getAttemptId());
+        storedAttempt.setApplicationId(appAttemptId.getApplicationId().getId());
+        storedAttempt.setClusterTimeStamp(
+                appAttemptId.getApplicationId().getClusterTimestamp());
+        
+        Container container = attemptStateData.getMasterContainer();
+        
+        if (container != null) {
+            ContainerPBImpl containerPBImpl = as(ContainerPBImpl.class, container);
+            
+            if (containerPBImpl == null) {
+                throw new NullPointerException("Invalid masterContainer data");
+            }
+            
+            storedAttempt.setMasterContainer(containerPBImpl.getProto().toByteArray());
+        } else {
+            storedAttempt.setMasterContainer(null);
+        }
+        _session.persist(storedAttempt);
     }
 
     @Override
     protected void removeApplicationState(ApplicationState appState) throws Exception {
-        throw new UnsupportedOperationException("Not supported yet.");
-    }
-    /*
-    @Override
-    protected void storeApplicationState(String appId, byte[] appStateData) throws Exception {  
-        ApplicationId applicationId = ConverterUtils.toApplicationId(appId);
-
-        NdbApplicationStateCJ storedApp =
-                _session.newInstance(NdbApplicationStateCJ.class);
-        storedApp.setId(applicationId.getId());
-        storedApp.setClusterTimeStamp(applicationId.getClusterTimestamp());
-        storedApp.setAppState(appStateData);
         
-        //another option here just to store the submit time and app submission context
-        //which is our original design, but we need to deserialize appStateData
-        
-        _session.persist(storedApp);
-    }
-    //*/
-
-    /*
-    @Override
-    protected void storeApplicationAttemptState(String attemptId, byte[] attemptStateData) throws Exception {
-        ApplicationAttemptId appAttemptId = 
-                ConverterUtils.toApplicationAttemptId(attemptId);
-        
-        NdbAttemptStateCJ storedAttempt =
-                _session.newInstance(NdbAttemptStateCJ.class);
-        storedAttempt.setAttemptId(appAttemptId.getAttemptId());
-        storedAttempt.setApplicationId(
-                appAttemptId.getApplicationId().getId());
-        storedAttempt.setClusterTimeStamp(
-                appAttemptId.getApplicationId().getClusterTimestamp());
-        
-        storedAttempt.setAppAttemptState(attemptStateData);
-        
-        //Write NdbAttemptState to ndb database
-        _session.persist(storedAttempt);
-    }
-    //*/
-
-    /*
-    @Override
-    protected void removeApplicationState(String appId) throws Exception {
         //Construct ApplicationState table's PK
-        ApplicationId applicationId = ConverterUtils.toApplicationId(appId);
+        ApplicationId applicationId = appState.getAppId();
         Integer intAppId = new Integer(applicationId.getId());
         Long longClusterTs = new Long(applicationId.getClusterTimestamp());
         Object[] primaryKey = {intAppId, longClusterTs};
-
-        NdbApplicationStateCJ appState = _session.find(NdbApplicationStateCJ.class,
-                primaryKey);
         
-        if(appState == null)
-        {
+        NdbApplicationStateCJ appStateNdb = 
+                _session.find(NdbApplicationStateCJ.class, primaryKey);
+        
+        if(appStateNdb == null){
             //does not need to continue if application state is not valid
             return;
         }
-
+        
         //Delete the attempts first, query the corresponding attempt to be deleted
+        //may be it is possible to simplify this by introducing trigger in database (?)
         QueryBuilder builder = _session.getQueryBuilder();
         QueryDomainType<NdbAttemptStateCJ> domainAttempt =
                 builder.createQueryDefinition(NdbAttemptStateCJ.class);
@@ -260,72 +323,14 @@ public class NdbRMStateStore extends RMStateStore {
 
         List<NdbAttemptStateCJ> resultsAttempt = queryAttempt.getResultList();
         _session.deletePersistentAll(resultsAttempt);
-
-        //Delete the application state
-        _session.deletePersistent(appState);
+        
+        _session.deletePersistent(appStateNdb);
+        
     }
-    //*/
-
-    /*
-    @Override
-    protected void removeApplicationAttemptState(String attemptId) throws Exception {
-        ApplicationAttemptId appAttemptId =
-                ConverterUtils.toApplicationAttemptId(attemptId);
-        
-        Integer intAttemptId = new Integer(appAttemptId.getAttemptId());
-        Integer intAppId = new Integer(appAttemptId.getApplicationId().getId());
-        Long longClusterTs = new Long(appAttemptId.getApplicationId().
-                getClusterTimestamp());
-        
-        
-        Object[] primaryKey = {intAttemptId, intAppId, longClusterTs};
-        NdbAttemptStateCJ attempt = 
-                _session.find(NdbAttemptStateCJ.class, primaryKey);
-        
-        if(attempt != null)
-        {
-            _session.deletePersistent(NdbAttemptStateCJ.class, attempt);
-        }     
-    }
-    //*/
 
     public void clearData()
     {
         _session.deletePersistentAll(NdbApplicationStateCJ.class);
         _session.deletePersistentAll(NdbAttemptStateCJ.class);
-    }
-
-    @PersistenceCapable(table = "applicationstate")
-    public interface NdbApplicationStateCJ {
-
-        @PrimaryKey
-        int getId();
-        void setId(int id);
-
-        @PrimaryKey
-        long getClusterTimeStamp();
-        void setClusterTimeStamp(long time);
-        
-        byte[] getAppState();
-        void setAppState(byte[] context);
-    }
-
-    @PersistenceCapable(table = "applicationattempt")
-    public interface NdbAttemptStateCJ {
-
-        @PrimaryKey
-        int getAttemptId();
-        void setAttemptId(int id);
-
-        @PrimaryKey
-        int getApplicationId();
-        void setApplicationId(int id);
-        
-        @PrimaryKey
-        long getClusterTimeStamp();
-        void setClusterTimeStamp(long time);
-        
-        byte[] getAppAttemptState();
-        void setAppAttemptState(byte[] state);
     }
 }
