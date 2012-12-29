@@ -156,7 +156,7 @@
                         <value>org.apache.hadoop.test.TimedOutTestsListener</value>
                     </property>
                 </properties>
-                <argLine>-Djava.library.path=/home/arinto/sql/mysql/lib</argLine>
+                <argLine>-Djava.library.path=/home/yarn/mysql/lib</argLine>
             </configuration>
             </plugin>
         </plugins>
